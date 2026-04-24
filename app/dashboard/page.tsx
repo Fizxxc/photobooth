@@ -15,10 +15,20 @@ export default async function DashboardPage() {
   const role = viewer.profile?.role ?? 'guest';
   const name = viewer.profile?.full_name ?? viewer.user?.email ?? 'Guest';
 
-  let data = { wallet: { balance: 0 }, overlays: [], booths: [], subscription: null as any };
+  let data: {
+    wallet: { balance: number };
+    overlays: any[];
+    booths: any[];
+    subscription: any;
+  } = {
+    wallet: { balance: 0 },
+    overlays: [],
+    booths: [],
+    subscription: null
+  };
   try {
     data = await getDashboardData(userId);
-  } catch {}
+  } catch { }
 
   let bucketId = buildUserBucketId(userId);
 

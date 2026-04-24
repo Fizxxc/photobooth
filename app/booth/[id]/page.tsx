@@ -1,15 +1,15 @@
-import { AppShell } from '@/components/app-shell';
 import { BoothRuntime } from '@/components/booth/booth-runtime';
 import { getBoothRuntimeData } from '@/lib/queries/booth';
 import { getViewer } from '@/lib/viewer';
+import { getServerEnv } from '@/lib/env.server';
 
 export default async function BoothPage({ params }: { params: { id: string } }) {
   const viewer = await getViewer();
-  const role = viewer.profile?.role ?? 'guest';
-  const name = viewer.profile?.full_name ?? viewer.user?.email ?? 'Guest';
+  const env = getServerEnv();
+  const isAdmin = viewer.profile?.role === 'admin';
 
   let boothId = params.id;
-  let boothName = 'KoGraph Booth';
+  let boothName = 'KoGraph Studio Booth';
   let overlays: Array<{
     id: string;
     label: string;
@@ -24,7 +24,7 @@ export default async function BoothPage({ params }: { params: { id: string } }) 
 
       if (data?.booth?.id) {
         boothId = data.booth.id;
-        boothName = data.booth.name ?? 'KoGraph Booth';
+        boothName = data.booth.name ?? 'KoGraph Studio Booth';
       }
 
       if (Array.isArray(data?.overlays) && data.overlays.length > 0) {
@@ -42,26 +42,12 @@ export default async function BoothPage({ params }: { params: { id: string } }) 
   }
 
   return (
-    <AppShell
-      currentPath="/booth"
-      title="Booth Runtime"
-      description="Cinematic Sony A6400 booth runtime with browser-side 3-photo strip composition."
-      role={role}
-      profileName={name}
-    >
-      <div className="space-y-6">
-        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-panel">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-600">Live Booth</p>
-              <h2 className="text-2xl font-bold text-slate-950">{boothName}</h2>
-              <p className="text-sm text-slate-500">1 session = 3 photos = 1 overlay strip.</p>
-            </div>
-          </div>
-        </div>
-
-        <BoothRuntime boothId={boothId} overlays={overlays} />
-      </div>
-    </AppShell>
+    <BoothRuntime
+      boothId={boothId}
+      boothName={boothName}
+      overlays={overlays}
+      isAdmin={isAdmin}
+      telegramBotUsername={env.TELEGRAM_BOT_USERNAME ?? null}
+    />
   );
 }

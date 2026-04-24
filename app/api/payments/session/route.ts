@@ -1,35 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createPakasirBilling } from '@/lib/billing/pakasir';
+import { createPakasirQrisTransaction } from '@/lib/billing/pakasir';
 import { SESSION_PRICE_IDR } from '@/lib/constants';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const supabase = createSupabaseServerClient();
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const sessionId = String(body.sessionId ?? '');
-  const { data: session } = await supabase
+
+  if (!sessionId) {
+    return NextResponse.json({ error: 'Session ID is required' }, { status: 400 });
+  }
+
+  const { data: session, error: sessionError } = await supabase
     .from('sessions')
     .select('id, session_code')
     .eq('id', sessionId)
-    .eq('user_id', auth.user.id)
     .single();
 
-  if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  if (sessionError || !session) {
+    return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  }
 
-  const orderId = `SESS-${session.session_code}`;
-  const billing = await createPakasirBilling({
+  const orderId = `SESSION-${session.id}-${Date.now()}`;
+
+  const billing = await createPakasirQrisTransaction({
     orderId,
-    amount: SESSION_PRICE_IDR,
-    productName: 'KoGraph Photo Session',
-    redirectUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`,
-    notes: session.session_code
+    amount: SESSION_PRICE_IDR
   });
 
-  await supabase.from('pakasir_orders').insert({
-    user_id: auth.user.id,
+  const { error: insertError } = await supabase.from('pakasir_orders').insert({
+    user_id: user.id,
     session_id: session.id,
     order_id: orderId,
     purpose: 'session',
@@ -37,6 +47,10 @@ export async function POST(request: NextRequest) {
     platform_fee: 1000,
     status: 'pending'
   });
+
+  if (insertError) {
+    return NextResponse.json({ error: insertError.message }, { status: 500 });
+  }
 
   return NextResponse.json(billing);
 }
