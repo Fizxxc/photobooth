@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
       const templateBuffer = Buffer.from(await templateBlob.arrayBuffer());
       const posterBuffer = await buildSupportQrisPoster({
         templateBuffer,
-        qrisString
+        qrisString: qrString
       });
 
       await admin.from('pakasir_orders').insert({
@@ -146,7 +146,8 @@ export async function POST(request: NextRequest) {
         }
       });
 
-      const posterBlob = new Blob([posterBuffer], { type: 'image/png' });
+      const posterBytes = new Uint8Array(posterBuffer);
+      const posterBlob = new Blob([posterBytes], { type: 'image/png' });
 
       await sendTelegramPhoto(
         {
@@ -238,10 +239,10 @@ export async function POST(request: NextRequest) {
       await sendTelegramMessage(
         chatId,
         `❓ Bantuan KoGraph Studio\n\n` +
-          `• Gunakan /start KODE_UNIK untuk mengambil hasil sesi.\n` +
-          `• Gunakan tombol Support Developer untuk membuka QRIS dukungan.\n` +
-          `• Gunakan tombol Lihat Overlay untuk melihat overlay aktif.\n` +
-          `• Gunakan tombol Lokasi Booth untuk melihat titik booth.\n`
+        `• Gunakan /start KODE_UNIK untuk mengambil hasil sesi.\n` +
+        `• Gunakan tombol Support Developer untuk membuka QRIS dukungan.\n` +
+        `• Gunakan tombol Lihat Overlay untuk melihat overlay aktif.\n` +
+        `• Gunakan tombol Lokasi Booth untuk melihat titik booth.\n`
       );
 
       return NextResponse.json({ ok: true });
@@ -267,7 +268,7 @@ export async function POST(request: NextRequest) {
     await sendTelegramMessage(
       chatId,
       `Selamat datang di KoGraph Studio Bot.\n\n` +
-        `Kirim /start KODE_UNIK untuk mengambil hasil fotomu dari booth.`
+      `Kirim /start KODE_UNIK untuk mengambil hasil fotomu dari booth.`
     );
     return NextResponse.json({ ok: true });
   }
