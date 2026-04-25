@@ -3,6 +3,7 @@ import 'server-only';
 import { getServerEnv, requireServerEnv } from '@/lib/env.server';
 
 type TelegramPrimitive = string | number;
+type TelegramParseMode = 'Markdown' | 'HTML';
 
 export type TelegramInlineKeyboardButton = {
   text: string;
@@ -14,10 +15,13 @@ export type TelegramReplyMarkup = {
   inline_keyboard: TelegramInlineKeyboardButton[][];
 };
 
-type SendTelegramPhotoInput = {
+type SendTelegramPhotoObject = {
   chatId: TelegramPrimitive;
-  photo: Blob | File;
+  photo?: Blob | File;
+  photoUrl?: string;
   caption?: string;
+  replyMarkup?: TelegramReplyMarkup;
+  parseMode?: TelegramParseMode;
 };
 
 function telegramApi(path: string) {
@@ -51,18 +55,22 @@ export function buildTelegramDeepLink(code: string) {
   return `https://t.me/${serverEnv.TELEGRAM_BOT_USERNAME}?start=${encodeURIComponent(code)}`;
 }
 
-export async function sendTelegramMessage(
-  chatId: TelegramPrimitive,
-  text: string,
-  replyMarkup?: TelegramReplyMarkup
-) {
+export async function sendTelegramMessage(input: {
+  chatId: TelegramPrimitive;
+  text: string;
+  replyMarkup?: TelegramReplyMarkup;
+  parseMode?: TelegramParseMode;
+  disableWebPagePreview?: boolean;
+}) {
   const response = await fetch(telegramApi('/sendMessage'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      reply_markup: replyMarkup
+      chat_id: input.chatId,
+      text: input.text,
+      parse_mode: input.parseMode,
+      reply_markup: input.replyMarkup,
+      disable_web_page_preview: input.disableWebPagePreview ?? true
     }),
     cache: 'no-store'
   });
@@ -70,20 +78,24 @@ export async function sendTelegramMessage(
   return await parseTelegramResponse(response);
 }
 
-export async function editTelegramMessage(
-  chatId: TelegramPrimitive,
-  messageId: number,
-  text: string,
-  replyMarkup?: TelegramReplyMarkup
-) {
+export async function editTelegramMessage(input: {
+  chatId: TelegramPrimitive;
+  messageId: number;
+  text: string;
+  replyMarkup?: TelegramReplyMarkup;
+  parseMode?: TelegramParseMode;
+  disableWebPagePreview?: boolean;
+}) {
   const response = await fetch(telegramApi('/editMessageText'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      chat_id: chatId,
-      message_id: messageId,
-      text,
-      reply_markup: replyMarkup
+      chat_id: input.chatId,
+      message_id: input.messageId,
+      text: input.text,
+      parse_mode: input.parseMode,
+      reply_markup: input.replyMarkup,
+      disable_web_page_preview: input.disableWebPagePreview ?? true
     }),
     cache: 'no-store'
   });
@@ -133,41 +145,22 @@ export async function sendChatAction(
   return await parseTelegramResponse(response);
 }
 
-export async function sendTelegramDocument(
-  chatId: TelegramPrimitive,
-  fileUrl: string,
-  caption?: string,
-  replyMarkup?: TelegramReplyMarkup
-) {
+export async function sendTelegramDocument(input: {
+  chatId: TelegramPrimitive;
+  fileUrl: string;
+  caption?: string;
+  replyMarkup?: TelegramReplyMarkup;
+  parseMode?: TelegramParseMode;
+}) {
   const response = await fetch(telegramApi('/sendDocument'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      chat_id: chatId,
-      document: fileUrl,
-      caption,
-      reply_markup: replyMarkup
-    }),
-    cache: 'no-store'
-  });
-
-  return await parseTelegramResponse(response);
-}
-
-export async function sendTelegramPhotoUrl(
-  chatId: TelegramPrimitive,
-  photoUrl: string,
-  caption?: string,
-  replyMarkup?: TelegramReplyMarkup
-) {
-  const response = await fetch(telegramApi('/sendPhoto'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      photo: photoUrl,
-      caption,
-      reply_markup: replyMarkup
+      chat_id: input.chatId,
+      document: input.fileUrl,
+      caption: input.caption,
+      parse_mode: input.parseMode,
+      reply_markup: input.replyMarkup
     }),
     cache: 'no-store'
   });
@@ -180,31 +173,83 @@ export async function sendTelegramPhoto(
   photo: Blob | File,
   caption?: string
 ): Promise<unknown>;
-export async function sendTelegramPhoto(input: SendTelegramPhotoInput): Promise<unknown>;
+export async function sendTelegramPhoto(input: SendTelegramPhotoObject): Promise<unknown>;
 export async function sendTelegramPhoto(
-  arg1: TelegramPrimitive | SendTelegramPhotoInput,
+  arg1: TelegramPrimitive | SendTelegramPhotoObject,
   arg2?: Blob | File,
   arg3?: string
 ): Promise<unknown> {
-  const chatId = typeof arg1 === 'object' ? arg1.chatId : arg1;
-  const photo = typeof arg1 === 'object' ? arg1.photo : arg2;
-  const caption = typeof arg1 === 'object' ? arg1.caption : arg3;
+  if (typeof arg1 !== 'object') {
+    const form = new FormData();
+    form.set('chat_id', String(arg1));
+    form.set('photo', arg2 as Blob, 'telegram-image.png');
+    if (arg3) form.set('caption', arg3);
 
-  if (!photo) {
+    const response = await fetch(telegramApi('/sendPhoto'), {
+      method: 'POST',
+      body: form,
+      cache: 'no-store'
+    });
+
+    return await parseTelegramResponse(response);
+  }
+
+  const input = arg1;
+
+  if (input.photoUrl) {
+    const response = await fetch(telegramApi('/sendPhoto'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: input.chatId,
+        photo: input.photoUrl,
+        caption: input.caption,
+        parse_mode: input.parseMode,
+        reply_markup: input.replyMarkup
+      }),
+      cache: 'no-store'
+    });
+
+    return await parseTelegramResponse(response);
+  }
+
+  if (!input.photo) {
     throw new Error('Telegram photo is required.');
   }
 
   const form = new FormData();
-  form.set('chat_id', String(chatId));
-  form.set('photo', photo, 'telegram-image.png');
-
-  if (caption) {
-    form.set('caption', caption);
-  }
+  form.set('chat_id', String(input.chatId));
+  form.set('photo', input.photo, 'telegram-image.png');
+  if (input.caption) form.set('caption', input.caption);
+  if (input.parseMode) form.set('parse_mode', input.parseMode);
+  if (input.replyMarkup) form.set('reply_markup', JSON.stringify(input.replyMarkup));
 
   const response = await fetch(telegramApi('/sendPhoto'), {
     method: 'POST',
     body: form,
+    cache: 'no-store'
+  });
+
+  return await parseTelegramResponse(response);
+}
+
+export async function editTelegramMessageCaption(input: {
+  chatId: TelegramPrimitive;
+  messageId: number;
+  caption: string;
+  replyMarkup?: TelegramReplyMarkup;
+  parseMode?: TelegramParseMode;
+}) {
+  const response = await fetch(telegramApi('/editMessageCaption'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: input.chatId,
+      message_id: input.messageId,
+      caption: input.caption,
+      parse_mode: input.parseMode,
+      reply_markup: input.replyMarkup
+    }),
     cache: 'no-store'
   });
 
