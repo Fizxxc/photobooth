@@ -6,15 +6,15 @@ import {
   Camera,
   CheckCircle2,
   Download,
+  Heart,
   Loader2,
   Printer,
   QrCode,
   RotateCcw,
   Sparkles,
-  TimerReset,
-  Heart,
-  BadgeDollarSign
+  TimerReset
 } from 'lucide-react';
+
 import { createSessionDraft, markSessionUploaded } from '@/app/actions/booth';
 import { buildPhotoStrip } from '@/lib/booth/canvas';
 import { printPhotoStrip } from '@/lib/booth/print';
@@ -38,6 +38,19 @@ type BoothRuntimeProps = {
   telegramBotUsername?: string | null;
 };
 
+type SlotPercent = {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+};
+
+const SLOT_LAYOUT: SlotPercent[] = [
+  { top: 7.2, left: 5.62, width: 88.94, height: 22.96 },
+  { top: 32.82, left: 5.62, width: 88.94, height: 22.96 },
+  { top: 58.42, left: 5.62, width: 88.94, height: 22.96 }
+];
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -48,16 +61,28 @@ function sleep(ms: number) {
 
 export function BoothRuntime({
   boothId,
-  boothName = 'KoGraph Studio',
+  boothName = 'KoGraph Studio Booth',
   overlays = [],
   isAdmin = false,
   telegramBotUsername = null
 }: BoothRuntimeProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  /**
+   * Hidden source video (dipakai untuk capture oleh useCamera hook)
+   */
+  const sourceVideoRef = useRef<HTMLVideoElement>(null);
+
+  /**
+   * Visible preview videos (3 panel live)
+   */
+  const previewTopRef = useRef<HTMLVideoElement>(null);
+  const previewMiddleRef = useRef<HTMLVideoElement>(null);
+  const previewBottomRef = useRef<HTMLVideoElement>(null);
+
   const previewUrlsRef = useRef<string[]>([]);
   const finalPreviewRef = useRef<string | null>(null);
+  const shutterTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { isReady, error, start, stop, captureFrame } = useCamera(videoRef, {
+  const { isReady, error, start, stop, captureFrame } = useCamera(sourceVideoRef, {
     width: 1920,
     height: 1080,
     frameRate: 60
@@ -73,7 +98,7 @@ export function BoothRuntime({
   const [frames, setFrames] = useState<Blob[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [finalPreview, setFinalPreview] = useState<string | null>(null);
-  const [status, setStatus] = useState('Pilih overlay favorit lalu mulai sesi 3 foto.');
+  const [status, setStatus] = useState('Pilih overlay yang cocok, atur timer, lalu mulai sesi foto.');
   const [countdownPreset, setCountdownPreset] = useState<3 | 5>(3);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [activeShot, setActiveShot] = useState<number>(0);
@@ -83,6 +108,13 @@ export function BoothRuntime({
   const [donationAmount, setDonationAmount] = useState<string>('1000');
   const [donationModal, setDonationModal] = useState<BillingModalData | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  /**
+   * Shutter / sensor animation
+   */
+  const [shutterFlash, setShutterFlash] = useState(false);
+  const [shutterPulse, setShutterPulse] = useState(false);
+  const [scanFlash, setScanFlash] = useState(false);
 
   useEffect(() => {
     previewUrlsRef.current = previews;
@@ -104,9 +136,35 @@ export function BoothRuntime({
     return () => {
       stop();
       previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-      if (finalPreviewRef.current) URL.revokeObjectURL(finalPreviewRef.current);
+
+      if (finalPreviewRef.current) {
+        URL.revokeObjectURL(finalPreviewRef.current);
+      }
+
+      if (shutterTimeoutRef.current) {
+        clearTimeout(shutterTimeoutRef.current);
+      }
     };
   }, [start, stop]);
+
+  /**
+   * Sinkronkan stream dari source video ke 3 panel preview
+   */
+  useEffect(() => {
+    const sourceEl = sourceVideoRef.current;
+    const stream = (sourceEl?.srcObject as MediaStream | null) ?? null;
+    if (!stream) return;
+
+    const targets = [previewTopRef.current, previewMiddleRef.current, previewBottomRef.current];
+
+    targets.forEach((target) => {
+      if (!target) return;
+      if (target.srcObject !== stream) {
+        target.srcObject = stream;
+      }
+      void target.play().catch(() => undefined);
+    });
+  }, [isReady, selectedOverlayId]);
 
   const selectedOverlay = useMemo(() => {
     return validOverlays.find((item) => item.id === selectedOverlayId) ?? validOverlays[0] ?? null;
@@ -132,21 +190,44 @@ export function BoothRuntime({
           margin: 1,
           errorCorrectionLevel: 'M'
         });
-        if (!cancelled) setTelegramQrUrl(dataUrl);
+
+        if (!cancelled) {
+          setTelegramQrUrl(dataUrl);
+        }
       } catch {
-        if (!cancelled) setTelegramQrUrl(null);
+        if (!cancelled) {
+          setTelegramQrUrl(null);
+        }
       }
     }
 
     void generateQr();
+
     return () => {
       cancelled = true;
     };
   }, [telegramDeepLink]);
 
+  function triggerShutterEffect() {
+    if (shutterTimeoutRef.current) {
+      clearTimeout(shutterTimeoutRef.current);
+    }
+
+    setShutterFlash(true);
+    setShutterPulse(true);
+    setScanFlash(true);
+
+    shutterTimeoutRef.current = setTimeout(() => {
+      setShutterFlash(false);
+      setShutterPulse(false);
+      setScanFlash(false);
+    }, 420);
+  }
+
   function clearTransientAssets() {
     previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     previewUrlsRef.current = [];
+
     if (finalPreviewRef.current) {
       URL.revokeObjectURL(finalPreviewRef.current);
       finalPreviewRef.current = null;
@@ -162,7 +243,7 @@ export function BoothRuntime({
     setCountdown(null);
     setActiveShot(0);
     setIsCapturingSequence(false);
-    setStatus('Sesi direset. Pilih overlay lalu mulai lagi.');
+    setStatus('Sesi direset. Silakan pilih overlay dan mulai lagi.');
   }
 
   async function finalizeSequence(capturedFrames: Blob[]) {
@@ -170,70 +251,87 @@ export function BoothRuntime({
       setStatus('Booth ID tidak valid. Silakan buka ulang booth.');
       return;
     }
+
     if (!selectedOverlay) {
-      setStatus('Belum ada overlay aktif. Upload overlay dari dashboard terlebih dahulu.');
+      setStatus('Belum ada overlay aktif. Upload overlay terlebih dahulu.');
       return;
     }
+
     if (!selectedOverlay.signed_url) {
-      setStatus('URL overlay tidak tersedia. Coba refresh overlay.');
+      setStatus('URL overlay belum tersedia. Coba refresh data overlay.');
       return;
     }
 
-    startTransition(async () => {
-      try {
-        setStatus('Menyusun photostrip final...');
-        const finalStripBlob = await buildPhotoStrip({
-          frames: capturedFrames,
-          overlayUrl: selectedOverlay.signed_url
-        });
+    startTransition(() => {
+      void (async () => {
+        try {
+          setStatus('Menyusun hasil photostrip final...');
 
-        const draft = await createSessionDraft({ boothId, overlayId: selectedOverlay.id });
-        const supabase = createSupabaseBrowserClient();
-
-        setStatus('Mengunggah hasil akhir...');
-        const { error: uploadError } = await supabase.storage
-          .from(draft.final_bucket_id)
-          .upload(draft.final_storage_path, finalStripBlob, {
-            contentType: 'image/png',
-            upsert: false
+          const finalStripBlob = await buildPhotoStrip({
+            frames: capturedFrames,
+            overlayUrl: selectedOverlay.signed_url
           });
 
-        if (uploadError) {
-          throw uploadError;
+          const draft = await createSessionDraft({
+            boothId,
+            overlayId: selectedOverlay.id
+          });
+
+          const supabase = createSupabaseBrowserClient();
+
+          setStatus('Mengunggah hasil akhir...');
+
+          const { error: uploadError } = await supabase.storage
+            .from(draft.final_bucket_id)
+            .upload(draft.final_storage_path, finalStripBlob, {
+              contentType: 'image/png',
+              upsert: false
+            });
+
+          if (uploadError) {
+            throw uploadError;
+          }
+
+          const rawFrames = Array.from({ length: 3 }).map(
+            (_, index) => `sessions/${draft.session_code}/raw-${index + 1}.jpg`
+          );
+
+          await markSessionUploaded(draft.id, rawFrames, Boolean((draft as any).is_free_capture));
+
+          if (finalPreviewRef.current) {
+            URL.revokeObjectURL(finalPreviewRef.current);
+          }
+
+          const nextPreviewUrl = URL.createObjectURL(finalStripBlob);
+          finalPreviewRef.current = nextPreviewUrl;
+          setFinalPreview(nextPreviewUrl);
+          setSessionCode(draft.session_code);
+
+          setStatus(
+            (draft as any).is_free_capture
+              ? 'Photostrip siap. Silakan download, print, atau scan QR Telegram.'
+              : 'Photostrip siap. Lanjutkan pembayaran atau ambil hasil lewat Telegram.'
+          );
+        } catch (caught) {
+          console.error(caught);
+          setStatus(caught instanceof Error ? caught.message : 'Terjadi kesalahan saat menyelesaikan sesi.');
         }
-
-        const rawFrames = Array.from({ length: 3 }).map(
-          (_, index) => `sessions/${draft.session_code}/raw-${index + 1}.jpg`
-        );
-        await markSessionUploaded(draft.id, rawFrames, Boolean((draft as any).is_free_capture));
-
-        if (finalPreviewRef.current) URL.revokeObjectURL(finalPreviewRef.current);
-        const nextPreviewUrl = URL.createObjectURL(finalStripBlob);
-        finalPreviewRef.current = nextPreviewUrl;
-        setFinalPreview(nextPreviewUrl);
-        setSessionCode(draft.session_code);
-        setStatus(
-          (draft as any).is_free_capture
-            ? 'Photostrip siap. Silakan download, print, atau scan QR Telegram.'
-            : 'Photostrip siap. Lanjutkan pembayaran atau kirim hasil lewat Telegram.'
-        );
-      } catch (caught) {
-        console.error(caught);
-        setStatus(caught instanceof Error ? caught.message : 'Terjadi kesalahan saat menyelesaikan sesi.');
-      }
+      })();
     });
   }
 
   async function handleCaptureSequence() {
     try {
       if (!isReady) {
-        setStatus('Kamera belum siap. Tunggu sebentar atau restart kamera.');
+        setStatus('Kamera belum siap. Tunggu sebentar lalu coba lagi.');
         return;
       }
+
       if (!selectedOverlay) {
         setStatus('Pilih overlay terlebih dahulu.');
         return;
       }
+
       if (isCapturingSequence || isPending) return;
 
       clearTransientAssets();
@@ -242,31 +340,41 @@ export function BoothRuntime({
       setFinalPreview(null);
       setSessionCode(null);
       setIsCapturingSequence(true);
-      setStatus('Sesi dimulai. Ambil pose terbaikmu.');
+      setStatus('Sesi dimulai. Silakan bersiap.');
 
       const captured: Blob[] = [];
       const previewUrls: string[] = [];
 
       for (let shot = 1; shot <= 3; shot += 1) {
         setActiveShot(shot);
+
         for (let t = countdownPreset; t >= 1; t -= 1) {
           setCountdown(t);
           setStatus(`Foto ${shot}/3 akan diambil dalam ${t} detik...`);
           await sleep(1000);
         }
+
         setCountdown(null);
+
+        triggerShutterEffect();
+        await sleep(130);
+
         const blob = await captureFrame();
         const previewUrl = URL.createObjectURL(blob);
+
         captured.push(blob);
         previewUrls.push(previewUrl);
+
         setFrames([...captured]);
         setPreviews([...previewUrls]);
         setStatus(`Foto ${shot}/3 berhasil diambil.`);
+
         await sleep(450);
       }
 
       setActiveShot(0);
       setIsCapturingSequence(false);
+
       await finalizeSequence(captured);
     } catch (caught) {
       console.error(caught);
@@ -280,6 +388,7 @@ export function BoothRuntime({
   async function handleDonation() {
     try {
       const amount = Number(donationAmount);
+
       if (!Number.isFinite(amount) || amount < 1000) {
         setStatus('Minimal donasi Rp 1.000.');
         return;
@@ -290,239 +399,497 @@ export function BoothRuntime({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount })
       });
+
       const payload = await response.json();
+
       if (!response.ok) {
-        throw new Error(payload?.error ?? 'Gagal membuat donasi QRIS.');
+        throw new Error(payload?.error ?? 'Gagal membuat QRIS donasi.');
       }
+
       setDonationModal(payload);
     } catch (caught) {
-      setStatus(caught instanceof Error ? caught.message : 'Gagal membuat donasi QRIS.');
+      setStatus(caught instanceof Error ? caught.message : 'Gagal membuat QRIS donasi.');
     }
   }
 
+  const shutterBusy = isCapturingSequence || isPending;
+
   return (
     <>
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top,#12335d_0%,#071224_45%,#030812_100%)] text-white">
-        <div className="mx-auto grid min-h-screen max-w-[1800px] gap-6 p-4 lg:grid-cols-[1.45fr_0.55fr] lg:p-6">
-          <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-black/25 p-4 shadow-2xl backdrop-blur xl:p-6">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.45em] text-cyan-300">KoGraph Studio</p>
-                <h1 className="mt-2 text-2xl font-bold text-white lg:text-3xl">{boothName}</h1>
-                <p className="mt-2 text-sm text-slate-300">Pilih overlay, atur timer, lalu satu klik untuk sesi 3 foto otomatis.</p>
-              </div>
-              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200">
-                <CheckCircle2 className={`h-4 w-4 ${isReady ? 'text-emerald-400' : 'text-amber-400'}`} />
-                {isReady ? 'Camera Ready' : 'Menyalakan kamera...'}
-              </div>
-            </div>
+      {/* hidden source video */}
+      <video ref={sourceVideoRef} autoPlay muted playsInline className="hidden" />
 
-            <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-black">
-              <video
-                ref={videoRef}
-                className="aspect-[16/9] h-full w-full object-cover [filter:saturate(1.08)_brightness(1.05)]"
-                autoPlay
-                muted
-                playsInline
-              />
-
-              {selectedOverlay?.signed_url ? (
-                <img
-                  src={selectedOverlay.signed_url}
-                  alt="Selected overlay"
-                  className="pointer-events-none absolute inset-0 h-full w-full object-contain"
-                />
-              ) : null}
-
-              <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-4">
-                <div className="rounded-full border border-white/10 bg-black/40 px-3 py-2 text-xs uppercase tracking-[0.25em] text-slate-200 backdrop-blur">
-                  Live preview
+      <div className="min-h-screen bg-[#041125] text-white">
+        <div className="mx-auto max-w-[1600px] px-4 py-5 lg:px-6 lg:py-6">
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            {/* MAIN STAGE */}
+            <section className="rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,24,46,0.94),rgba(5,10,20,0.98))] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.4)] lg:p-7">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.42em] text-cyan-300">
+                    KoGraph Studio
+                  </p>
+                  <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">
+                    {boothName}
+                  </h1>
+                  <p className="mt-2 max-w-xl text-sm leading-7 text-slate-300">
+                    Pilih overlay, atur timer, lalu sekali tekan untuk sesi tiga foto otomatis dengan preview yang rapi dan natural.
+                  </p>
                 </div>
-                {activeShot > 0 ? (
-                  <div className="rounded-full bg-black/55 px-4 py-2 text-sm font-semibold text-white backdrop-blur">
-                    Foto {activeShot}/3
-                  </div>
-                ) : null}
+
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-100">
+                  <CheckCircle2 className={`h-4 w-4 ${isReady ? 'text-emerald-400' : 'text-amber-400'}`} />
+                  {isReady ? 'Camera Ready' : 'Menyalakan kamera...'}
+                </div>
               </div>
 
-              {countdown !== null ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-950/30 backdrop-blur-[1px]">
-                  <div className="flex h-36 w-36 items-center justify-center rounded-full border border-white/15 bg-black/60 text-6xl font-black text-white shadow-2xl">
-                    {countdown}
+              <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] xl:items-start">
+                {/* STRIP LIVE PREVIEW */}
+                <div className="mx-auto w-full max-w-[400px]">
+                  <div className="relative mx-auto aspect-[105/297] w-full overflow-hidden rounded-[34px] border border-white/10 bg-[#f6e9eb] shadow-[0_24px_70px_rgba(0,0,0,0.45)]">
+                    {/* soft paper body */}
+                    <div className="absolute inset-0 bg-[linear-gradient(180deg,#f4e1e4_0%,#f7ebed_100%)]" />
+
+                    {/* live slots */}
+                    {SLOT_LAYOUT.map((slot, index) => {
+                      const ref =
+                        index === 0
+                          ? previewTopRef
+                          : index === 1
+                          ? previewMiddleRef
+                          : previewBottomRef;
+
+                      return (
+                        <div
+                          key={index}
+                          className="absolute overflow-hidden rounded-[28px] bg-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
+                          style={{
+                            top: `${slot.top}%`,
+                            left: `${slot.left}%`,
+                            width: `${slot.width}%`,
+                            height: `${slot.height}%`
+                          }}
+                        >
+                          <video
+                            ref={ref}
+                            autoPlay
+                            muted
+                            playsInline
+                            className="h-full w-full object-cover [filter:saturate(1.1)_brightness(1.05)]"
+                          />
+                        </div>
+                      );
+                    })}
+
+                    {/* overlay png full strip */}
+                    {selectedOverlay?.signed_url ? (
+                      <img
+                        src={selectedOverlay.signed_url}
+                        alt={selectedOverlay.label}
+                        className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+                      />
+                    ) : null}
+
+                    {/* subtle badge */}
+                    <div className="absolute left-4 top-4 rounded-full border border-white/12 bg-black/45 px-3 py-2 text-[11px] font-medium uppercase tracking-[0.28em] text-white/90 backdrop-blur">
+                      Live Preview
+                    </div>
+
+                    {/* shot indicator */}
+                    {activeShot > 0 ? (
+                      <div className="absolute right-4 top-4 rounded-full border border-white/10 bg-black/55 px-4 py-2 text-xs font-semibold text-white backdrop-blur">
+                        Shot {activeShot}/3
+                      </div>
+                    ) : null}
+
+                    {/* mirrorless shutter animation */}
+                    {scanFlash ? <div className="sensor-scan absolute inset-0 z-[20]" /> : null}
+                    {shutterFlash ? <div className="shutter-flash absolute inset-0 z-[21]" /> : null}
+                    {shutterPulse ? (
+                      <div className="absolute inset-0 z-[22] flex items-center justify-center">
+                        <div className="shutter-ring h-[140px] w-[140px] rounded-full border border-white/40" />
+                      </div>
+                    ) : null}
                   </div>
                 </div>
-              ) : null}
-            </div>
 
-            <div className="mt-4 grid gap-3 xl:grid-cols-[1fr_auto_auto]">
-              <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
-                {status}
-                {error ? <p className="mt-2 text-rose-300">{error}</p> : null}
-              </div>
-
-              <div className="flex items-center gap-2 rounded-[1.5rem] border border-white/10 bg-white/5 p-2">
-                <button
-                  type="button"
-                  onClick={() => setCountdownPreset(3)}
-                  className={`rounded-xl px-4 py-3 text-sm font-semibold transition ${countdownPreset === 3 ? 'bg-white text-slate-950' : 'text-white hover:bg-white/10'}`}
-                >
-                  3 sec
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCountdownPreset(5)}
-                  className={`rounded-xl px-4 py-3 text-sm font-semibold transition ${countdownPreset === 5 ? 'bg-white text-slate-950' : 'text-white hover:bg-white/10'}`}
-                >
-                  5 sec
-                </button>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="rounded-[1.4rem] border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
-                >
-                  <RotateCcw className="mr-2 inline h-4 w-4" />
-                  Reset
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleCaptureSequence()}
-                  disabled={!isReady || !selectedOverlay || isCapturingSequence || isPending}
-                  className="rounded-[1.4rem] bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isCapturingSequence || isPending ? (
-                    <><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Memproses...</>
-                  ) : (
-                    <><Camera className="mr-2 inline h-4 w-4" />Mulai 3 Foto</>
-                  )}
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <aside className="space-y-5">
-            <section className="rounded-[2rem] border border-white/10 bg-white/5 p-5 shadow-2xl backdrop-blur">
-              <div className="flex items-center gap-2 text-cyan-300">
-                <Sparkles className="h-4 w-4" />
-                <p className="text-xs font-semibold uppercase tracking-[0.35em]">Overlay live</p>
-              </div>
-              <h2 className="mt-3 text-xl font-bold text-white">Pilih overlay yang paling cocok</h2>
-              <div className="mt-4 grid max-h-[340px] gap-3 overflow-y-auto pr-1">
-                {validOverlays.length > 0 ? validOverlays.map((overlay) => {
-                  const active = overlay.id === selectedOverlayId;
-                  return (
-                    <button
-                      key={overlay.id}
-                      type="button"
-                      onClick={() => setSelectedOverlayId(overlay.id)}
-                      className={`flex items-center gap-3 rounded-[1.4rem] border p-3 text-left transition ${active ? 'border-cyan-300 bg-cyan-400/10' : 'border-white/10 bg-black/20 hover:bg-white/5'}`}
-                    >
-                      <div className="h-16 w-12 overflow-hidden rounded-xl border border-white/10 bg-white">
-                        {overlay.signed_url ? <img src={overlay.signed_url} alt={overlay.label} className="h-full w-full object-cover" /> : null}
-                      </div>
-                      <div>
-                        <p className="font-semibold text-white">{overlay.label}</p>
-                        <p className="mt-1 text-xs text-slate-400">Preview live akan langsung muncul di layar.</p>
-                      </div>
-                    </button>
-                  );
-                }) : (
-                  <div className="rounded-[1.4rem] border border-dashed border-white/10 bg-black/20 p-4 text-sm text-slate-300">
-                    Belum ada overlay aktif. Upload overlay PNG dari dashboard terlebih dahulu.
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <section className="rounded-[2rem] border border-white/10 bg-white/5 p-5 shadow-2xl backdrop-blur">
-              <div className="flex items-center gap-2 text-cyan-300">
-                <TimerReset className="h-4 w-4" />
-                <p className="text-xs font-semibold uppercase tracking-[0.35em]">Capture progress</p>
-              </div>
-              <div className="mt-4 grid grid-cols-3 gap-3">
-                {[0, 1, 2].map((index) => (
-                  <div key={index} className="overflow-hidden rounded-[1.25rem] border border-white/10 bg-black/25">
-                    {previews[index] ? (
-                      <img src={previews[index]} alt={`Capture ${index + 1}`} className="aspect-[3/4] w-full object-cover" />
-                    ) : (
-                      <div className="flex aspect-[3/4] items-center justify-center text-sm text-slate-500">{index + 1}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {finalPreview ? (
-              <section className="rounded-[2rem] border border-emerald-400/20 bg-emerald-500/10 p-5 shadow-2xl backdrop-blur">
-                <p className="text-xs uppercase tracking-[0.24em] text-emerald-200">Final strip ready</p>
-                <div className="mt-4 grid gap-4">
-                  <div className="flex justify-center">
-                    <img src={finalPreview} alt="Final photostrip" className="w-full max-w-[240px] rounded-[1.5rem] border border-white/10 bg-white" />
-                  </div>
-
-                  {telegramQrUrl && telegramDeepLink ? (
-                    <div className="rounded-[1.5rem] border border-white/10 bg-black/20 p-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                        <QrCode className="h-4 w-4 text-cyan-300" />
-                        Ambil foto via Telegram
-                      </div>
-                      <p className="mt-2 text-xs leading-6 text-slate-300">
-                        Scan QR ini untuk mengirim hasil ke bot Telegram. Kode unik untuk sesi ini dan diklaim oleh chat pertama yang memindainya.
+                {/* CONTROL AREA */}
+                <div className="flex min-h-full flex-col justify-between">
+                  <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5 lg:p-6">
+                    <div className="flex items-center gap-2 text-cyan-300">
+                      <Sparkles className="h-4 w-4" />
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.34em]">
+                        Session control
                       </p>
-                      <div className="mt-4 flex items-center gap-4">
-                        <img src={telegramQrUrl} alt="Telegram QR delivery" className="h-28 w-28 rounded-2xl bg-white p-2" />
-                        <a href={telegramDeepLink} target="_blank" rel="noreferrer" className="rounded-[1rem] border border-white/15 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
-                          Buka bot Telegram
-                        </a>
+                    </div>
+
+                    <div className="mt-4">
+                      <p className="text-lg font-semibold text-white">Ambil 3 foto otomatis</p>
+                      <p className="mt-2 text-sm leading-7 text-slate-300">
+                        Preview dibuat vertikal seperti photostrip final agar framing lebih natural sejak awal.
+                      </p>
+                    </div>
+
+                    <div className="mt-6 rounded-[20px] border border-white/10 bg-black/20 p-4">
+                      <p className="text-xs font-medium uppercase tracking-[0.26em] text-slate-400">
+                        Status
+                      </p>
+                      <p className="mt-3 text-sm leading-7 text-slate-200">{status}</p>
+                      {error ? (
+                        <p className="mt-3 text-sm text-rose-300">{error}</p>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-8 flex flex-col items-center justify-center">
+                      <div className="mb-4 text-center">
+                        <p className="text-[11px] uppercase tracking-[0.32em] text-slate-400">
+                          Countdown
+                        </p>
+
+                        <div className="mt-2 h-14 min-w-[90px] rounded-full border border-white/10 bg-white/5 px-6 flex items-center justify-center">
+                          <span className="text-2xl font-semibold tracking-tight text-white">
+                            {countdown !== null ? countdown : countdownPreset}
+                          </span>
+                          <span className="ml-2 text-xs uppercase tracking-[0.2em] text-slate-400">
+                            sec
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mb-5 flex items-center gap-2 rounded-full border border-white/10 bg-white/5 p-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setCountdownPreset(3)}
+                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                            countdownPreset === 3
+                              ? 'bg-white text-slate-950'
+                              : 'text-white hover:bg-white/10'
+                          }`}
+                        >
+                          3 sec
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCountdownPreset(5)}
+                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                            countdownPreset === 5
+                              ? 'bg-white text-slate-950'
+                              : 'text-white hover:bg-white/10'
+                          }`}
+                        >
+                          5 sec
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void handleCaptureSequence()}
+                        disabled={!isReady || !selectedOverlay || shutterBusy}
+                        className="group relative h-[114px] w-[114px] rounded-full border border-white/15 bg-[radial-gradient(circle_at_30%_30%,#ffffff_0%,#f5f7fb_30%,#dce2ea_60%,#b8c2cf_100%)] shadow-[0_18px_50px_rgba(0,0,0,0.35)] transition duration-200 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label="Mulai sesi 3 foto"
+                      >
+                        <span className="absolute inset-[10px] rounded-full border border-slate-400/40 bg-[radial-gradient(circle_at_35%_35%,#ffffff_0%,#eef2f7_50%,#d6dde6_100%)]" />
+                        <span className="absolute inset-[26px] rounded-full border border-slate-300/40 bg-white shadow-inner" />
+
+                        <span className="relative z-10 flex h-full w-full items-center justify-center">
+                          {shutterBusy ? (
+                            <Loader2 className="h-7 w-7 animate-spin text-slate-700" />
+                          ) : (
+                            <Camera className="h-7 w-7 text-slate-700 transition group-hover:scale-105" />
+                          )}
+                        </span>
+                      </button>
+
+                      <p className="mt-4 text-sm font-medium text-slate-200">
+                        {shutterBusy ? 'Memproses sesi...' : 'Tekan shutter untuk mulai'}
+                      </p>
+
+                      <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                        <button
+                          type="button"
+                          onClick={handleReset}
+                          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {finalPreview ? (
+                    <div className="mt-6 rounded-[28px] border border-emerald-400/20 bg-emerald-500/10 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+                      <p className="text-[11px] uppercase tracking-[0.28em] text-emerald-200">
+                        Final strip ready
+                      </p>
+
+                      <div className="mt-4 grid gap-5 md:grid-cols-[180px_minmax(0,1fr)] md:items-start">
+                        <div className="flex justify-center">
+                          <img
+                            src={finalPreview}
+                            alt="Final photostrip"
+                            className="w-full max-w-[180px] rounded-[20px] border border-white/10 bg-white"
+                          />
+                        </div>
+
+                        <div className="space-y-4">
+                          {telegramQrUrl && telegramDeepLink ? (
+                            <div className="rounded-[20px] border border-white/10 bg-black/20 p-4">
+                              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                                <QrCode className="h-4 w-4 text-cyan-300" />
+                                Ambil foto via Telegram
+                              </div>
+                              <p className="mt-2 text-xs leading-6 text-slate-300">
+                                Scan QR ini untuk mengirim hasil ke bot Telegram. Setiap sesi memakai kode unik agar hasil lebih aman.
+                              </p>
+
+                              <div className="mt-4 flex flex-wrap items-center gap-4">
+                                <img
+                                  src={telegramQrUrl}
+                                  alt="Telegram QR delivery"
+                                  className="h-28 w-28 rounded-2xl bg-white p-2"
+                                />
+
+                                <a
+                                  href={telegramDeepLink}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="rounded-[16px] border border-white/15 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+                                >
+                                  Buka bot Telegram
+                                </a>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <a
+                              href={finalPreview}
+                              download="kograph-strip.png"
+                              className="inline-flex items-center justify-center gap-2 rounded-[16px] bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:opacity-95"
+                            >
+                              <Download className="h-4 w-4" />
+                              Download
+                            </a>
+
+                            <button
+                              onClick={() => printPhotoStrip(finalPreview)}
+                              className="inline-flex items-center justify-center gap-2 rounded-[16px] border border-white/15 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+                            >
+                              <Printer className="h-4 w-4" />
+                              Print 10.5 × 29.7
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ) : null}
+                </div>
+              </div>
+            </section>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <a href={finalPreview} download="kograph-strip.png" className="flex items-center justify-center gap-2 rounded-[1.2rem] bg-white px-4 py-3 text-sm font-semibold text-slate-950">
-                      <Download className="h-4 w-4" />
-                      Download strip
-                    </a>
-                    <button onClick={() => printPhotoStrip(finalPreview)} className="flex items-center justify-center gap-2 rounded-[1.2rem] border border-white/15 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
-                      <Printer className="h-4 w-4" />
-                      Print 10.5 × 29.7 cm
+            {/* SIDEBAR */}
+            <aside className="space-y-5">
+              <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(12,25,46,0.92),rgba(8,15,28,0.98))] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.34)]">
+                <div className="flex items-center gap-2 text-cyan-300">
+                  <Sparkles className="h-4 w-4" />
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.34em]">
+                    Overlay live
+                  </p>
+                </div>
+
+                <h2 className="mt-3 text-2xl font-bold tracking-tight text-white">
+                  Pilih overlay yang paling cocok
+                </h2>
+
+                <div className="mt-5 space-y-3">
+                  {validOverlays.length > 0 ? (
+                    validOverlays.map((overlay) => {
+                      const active = overlay.id === selectedOverlayId;
+
+                      return (
+                        <button
+                          key={overlay.id}
+                          type="button"
+                          onClick={() => setSelectedOverlayId(overlay.id)}
+                          className={`w-full rounded-[22px] border p-3 text-left transition ${
+                            active
+                              ? 'border-cyan-300 bg-cyan-400/10'
+                              : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.05]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="h-16 w-12 overflow-hidden rounded-xl border border-white/10 bg-white">
+                              {overlay.signed_url ? (
+                                <img
+                                  src={overlay.signed_url}
+                                  alt={overlay.label}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : null}
+                            </div>
+
+                            <div className="min-w-0">
+                              <p className="truncate text-lg font-semibold text-white">
+                                {overlay.label}
+                              </p>
+                              <p className="mt-1 text-sm leading-6 text-slate-400">
+                                Preview akan langsung menyesuaikan di strip live.
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="rounded-[22px] border border-dashed border-white/10 bg-white/[0.03] p-4 text-sm leading-7 text-slate-300">
+                      Belum ada overlay aktif. Upload overlay PNG terlebih dahulu dari dashboard.
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(12,25,46,0.92),rgba(8,15,28,0.98))] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.34)]">
+                <div className="flex items-center gap-2 text-cyan-300">
+                  <TimerReset className="h-4 w-4" />
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.34em]">
+                    Capture progress
+                  </p>
+                </div>
+
+                <div className="mt-5 grid grid-cols-3 gap-3">
+                  {[0, 1, 2].map((index) => (
+                    <div
+                      key={index}
+                      className="overflow-hidden rounded-[20px] border border-white/10 bg-black/25"
+                    >
+                      {previews[index] ? (
+                        <img
+                          src={previews[index]}
+                          alt={`Capture ${index + 1}`}
+                          className="aspect-[3/4] w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex aspect-[3/4] items-center justify-center text-sm text-slate-500">
+                          {index + 1}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {isAdmin ? (
+                <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(12,25,46,0.92),rgba(8,15,28,0.98))] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.34)]">
+                  <div className="flex items-center gap-2 text-pink-300">
+                    <Heart className="h-4 w-4" />
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.34em]">
+                      Support booth
+                    </p>
+                  </div>
+
+                  <h3 className="mt-3 text-2xl font-bold tracking-tight text-white">
+                    Donasi booth via QRIS
+                  </h3>
+
+                  <p className="mt-2 text-sm leading-7 text-slate-300">
+                    Booth ini gratis untuk admin. Jika ingin mendukung operasional, masukkan nominal donasi minimal Rp 1.000.
+                  </p>
+
+                  <div className="mt-5 flex gap-3">
+                    <input
+                      type="number"
+                      min={1000}
+                      step={1000}
+                      value={donationAmount}
+                      onChange={(event) => setDonationAmount(event.target.value)}
+                      className="w-full rounded-[18px] border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+                      placeholder="1000"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => void handleDonation()}
+                      className="rounded-[18px] bg-pink-500 px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90"
+                    >
+                      Donasi
                     </button>
                   </div>
-                </div>
-              </section>
-            ) : null}
-
-            {isAdmin ? (
-              <section className="rounded-[2rem] border border-white/10 bg-white/5 p-5 shadow-2xl backdrop-blur">
-                <div className="flex items-center gap-2 text-pink-300">
-                  <Heart className="h-4 w-4" />
-                  <p className="text-xs font-semibold uppercase tracking-[0.35em]">Support booth</p>
-                </div>
-                <h3 className="mt-3 text-xl font-bold text-white">Donasi booth via QRIS</h3>
-                <p className="mt-2 text-sm text-slate-300">Booth ini gratis untuk admin. Jika ingin mendukung operasional, masukkan nominal donasi minimal Rp 1.000.</p>
-                <div className="mt-4 flex gap-3">
-                  <input
-                    type="number"
-                    min={1000}
-                    step={1000}
-                    value={donationAmount}
-                    onChange={(event) => setDonationAmount(event.target.value)}
-                    className="w-full rounded-[1.2rem] border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none"
-                    placeholder="1000"
-                  />
-                  <button onClick={() => void handleDonation()} className="rounded-[1.2rem] bg-pink-500 px-4 py-3 text-sm font-semibold text-white transition hover:opacity-90">
-                    <BadgeDollarSign className="mr-2 inline h-4 w-4" />Donasi
-                  </button>
-                </div>
-              </section>
-            ) : null}
-          </aside>
+                </section>
+              ) : null}
+            </aside>
+          </div>
         </div>
       </div>
 
-      {donationModal ? <QRISPaymentModal data={donationModal} onClose={() => setDonationModal(null)} /> : null}
+      {donationModal ? (
+        <QRISPaymentModal data={donationModal} onClose={() => setDonationModal(null)} />
+      ) : null}
+
+      <style jsx global>{`
+        .sensor-scan {
+          background:
+            linear-gradient(
+              180deg,
+              rgba(255, 255, 255, 0) 0%,
+              rgba(255, 255, 255, 0.06) 20%,
+              rgba(255, 255, 255, 0.22) 45%,
+              rgba(255, 255, 255, 0.06) 70%,
+              rgba(255, 255, 255, 0) 100%
+            );
+          animation: sensorScan 360ms ease-out forwards;
+        }
+
+        .shutter-flash {
+          background: rgba(255, 255, 255, 0.7);
+          mix-blend-mode: screen;
+          animation: shutterFlash 280ms ease-out forwards;
+        }
+
+        .shutter-ring {
+          animation: shutterPulse 320ms ease-out forwards;
+          box-shadow:
+            0 0 0 8px rgba(255, 255, 255, 0.08),
+            0 0 80px rgba(255, 255, 255, 0.18);
+        }
+
+        @keyframes sensorScan {
+          0% {
+            opacity: 0;
+            transform: translateY(-100%);
+          }
+          12% {
+            opacity: 1;
+          }
+          100% {
+            opacity: 0;
+            transform: translateY(100%);
+          }
+        }
+
+        @keyframes shutterFlash {
+          0% {
+            opacity: 0;
+          }
+          20% {
+            opacity: 1;
+          }
+          100% {
+            opacity: 0;
+          }
+        }
+
+        @keyframes shutterPulse {
+          0% {
+            opacity: 0.85;
+            transform: scale(0.72);
+          }
+          100% {
+            opacity: 0;
+            transform: scale(1.3);
+          }
+        }
+      `}</style>
     </>
   );
 }
