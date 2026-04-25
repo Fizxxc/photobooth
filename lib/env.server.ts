@@ -9,7 +9,8 @@ const serverSchema = z.object({
   PAKASIR_PLATFORM_FEE: z.coerce.number().int().nonnegative().default(1000),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_BOT_USERNAME: z.string().optional(),
-  TELEGRAM_WEBHOOK_SECRET: z.string().optional()
+  TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
+  SUPPORT_DEVELOPER_DEFAULT_AMOUNT: z.coerce.number().int().positive().default(1000)
 });
 
 export function getServerEnv() {
@@ -22,16 +23,19 @@ export function getServerEnv() {
     PAKASIR_PLATFORM_FEE: process.env.PAKASIR_PLATFORM_FEE ?? '1000',
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
     TELEGRAM_BOT_USERNAME: process.env.TELEGRAM_BOT_USERNAME,
-    TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET
+    TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
+    SUPPORT_DEVELOPER_DEFAULT_AMOUNT: process.env.SUPPORT_DEVELOPER_DEFAULT_AMOUNT ?? '1000'
   });
 }
 
 export function requireServerEnv(keys: Array<keyof ReturnType<typeof getServerEnv>>) {
   const env = getServerEnv();
+
   for (const key of keys) {
     if (!env[key]) {
       throw new Error(`Missing required server env: ${key}`);
     }
   }
+
   return env;
 }

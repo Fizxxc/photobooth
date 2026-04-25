@@ -4,17 +4,20 @@ import { getServerEnv, requireServerEnv } from '@/lib/env.server';
 
 type TelegramPrimitive = string | number;
 
+export type TelegramInlineKeyboardButton = {
+  text: string;
+  callback_data?: string;
+  url?: string;
+};
+
+export type TelegramReplyMarkup = {
+  inline_keyboard: TelegramInlineKeyboardButton[][];
+};
+
 type SendTelegramPhotoInput = {
   chatId: TelegramPrimitive;
   photo: Blob | File;
   caption?: string;
-};
-
-type SendTelegramDocumentInput = {
-  chatId: TelegramPrimitive;
-  document: Blob | File | string;
-  caption?: string;
-  filename?: string;
 };
 
 function telegramApi(path: string) {
@@ -40,7 +43,7 @@ async function parseTelegramResponse(response: Response) {
     );
   }
 
-  return payload;
+  return payload as any;
 }
 
 export function buildTelegramDeepLink(code: string) {
@@ -48,15 +51,18 @@ export function buildTelegramDeepLink(code: string) {
   return `https://t.me/${serverEnv.TELEGRAM_BOT_USERNAME}?start=${encodeURIComponent(code)}`;
 }
 
-export async function sendTelegramMessage(chatId: TelegramPrimitive, text: string) {
+export async function sendTelegramMessage(
+  chatId: TelegramPrimitive,
+  text: string,
+  replyMarkup?: TelegramReplyMarkup
+) {
   const response = await fetch(telegramApi('/sendMessage'), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text
+      text,
+      reply_markup: replyMarkup
     }),
     cache: 'no-store'
   });
@@ -64,24 +70,83 @@ export async function sendTelegramMessage(chatId: TelegramPrimitive, text: strin
   return await parseTelegramResponse(response);
 }
 
-/**
- * Kirim file lewat URL publik / signed URL.
- * Cocok untuk hasil photostrip dari Supabase Storage.
- */
+export async function editTelegramMessage(
+  chatId: TelegramPrimitive,
+  messageId: number,
+  text: string,
+  replyMarkup?: TelegramReplyMarkup
+) {
+  const response = await fetch(telegramApi('/editMessageText'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      reply_markup: replyMarkup
+    }),
+    cache: 'no-store'
+  });
+
+  return await parseTelegramResponse(response);
+}
+
+export async function deleteTelegramMessage(chatId: TelegramPrimitive, messageId: number) {
+  const response = await fetch(telegramApi('/deleteMessage'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId
+    }),
+    cache: 'no-store'
+  });
+
+  return await parseTelegramResponse(response);
+}
+
+export async function sendChatAction(
+  chatId: TelegramPrimitive,
+  action:
+    | 'typing'
+    | 'upload_photo'
+    | 'record_video'
+    | 'upload_video'
+    | 'record_voice'
+    | 'upload_voice'
+    | 'upload_document'
+    | 'choose_sticker'
+    | 'find_location'
+    | 'record_video_note'
+    | 'upload_video_note'
+) {
+  const response = await fetch(telegramApi('/sendChatAction'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      action
+    }),
+    cache: 'no-store'
+  });
+
+  return await parseTelegramResponse(response);
+}
+
 export async function sendTelegramDocument(
   chatId: TelegramPrimitive,
   fileUrl: string,
-  caption?: string
+  caption?: string,
+  replyMarkup?: TelegramReplyMarkup
 ) {
   const response = await fetch(telegramApi('/sendDocument'), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
       document: fileUrl,
-      caption
+      caption,
+      reply_markup: replyMarkup
     }),
     cache: 'no-store'
   });
@@ -89,38 +154,27 @@ export async function sendTelegramDocument(
   return await parseTelegramResponse(response);
 }
 
-/**
- * Versi tambahan kalau nanti kamu mau kirim Blob/File langsung
- * tanpa perlu URL.
- */
-export async function sendTelegramDocumentFile(input: SendTelegramDocumentInput) {
-  const form = new FormData();
-  form.set('chat_id', String(input.chatId));
-
-  if (typeof input.document === 'string') {
-    form.set('document', input.document);
-  } else {
-    form.set('document', input.document, input.filename ?? 'document.png');
-  }
-
-  if (input.caption) {
-    form.set('caption', input.caption);
-  }
-
-  const response = await fetch(telegramApi('/sendDocument'), {
+export async function sendTelegramPhotoUrl(
+  chatId: TelegramPrimitive,
+  photoUrl: string,
+  caption?: string,
+  replyMarkup?: TelegramReplyMarkup
+) {
+  const response = await fetch(telegramApi('/sendPhoto'), {
     method: 'POST',
-    body: form,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      photo: photoUrl,
+      caption,
+      reply_markup: replyMarkup
+    }),
     cache: 'no-store'
   });
 
   return await parseTelegramResponse(response);
 }
 
-/**
- * Overload:
- * 1) sendTelegramPhoto(chatId, photo, caption?)
- * 2) sendTelegramPhoto({ chatId, photo, caption })
- */
 export async function sendTelegramPhoto(
   chatId: TelegramPrimitive,
   photo: Blob | File,
@@ -142,7 +196,7 @@ export async function sendTelegramPhoto(
 
   const form = new FormData();
   form.set('chat_id', String(chatId));
-  form.set('photo', photo, 'broadcast-image.png');
+  form.set('photo', photo, 'telegram-image.png');
 
   if (caption) {
     form.set('caption', caption);
@@ -151,6 +205,44 @@ export async function sendTelegramPhoto(
   const response = await fetch(telegramApi('/sendPhoto'), {
     method: 'POST',
     body: form,
+    cache: 'no-store'
+  });
+
+  return await parseTelegramResponse(response);
+}
+
+export async function sendTelegramLocation(
+  chatId: TelegramPrimitive,
+  latitude: number,
+  longitude: number
+) {
+  const response = await fetch(telegramApi('/sendLocation'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      latitude,
+      longitude
+    }),
+    cache: 'no-store'
+  });
+
+  return await parseTelegramResponse(response);
+}
+
+export async function answerCallbackQuery(
+  callbackQueryId: string,
+  text?: string,
+  showAlert = false
+) {
+  const response = await fetch(telegramApi('/answerCallbackQuery'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      callback_query_id: callbackQueryId,
+      text,
+      show_alert: showAlert
+    }),
     cache: 'no-store'
   });
 
@@ -166,17 +258,14 @@ export async function getTelegramWebhookInfo() {
     cache: 'no-store'
   });
 
-  const payload = (await parseTelegramResponse(response)) as {
-    result?: unknown;
-  };
-
+  const payload = await parseTelegramResponse(response);
   return payload?.result ?? null;
 }
 
 export async function setTelegramWebhook(webhookUrl: string, secretToken?: string) {
   const body: Record<string, unknown> = {
     url: webhookUrl,
-    allowed_updates: ['message']
+    allowed_updates: ['message', 'callback_query']
   };
 
   if (secretToken) {
@@ -185,9 +274,7 @@ export async function setTelegramWebhook(webhookUrl: string, secretToken?: strin
 
   const response = await fetch(telegramApi('/setWebhook'), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     cache: 'no-store'
   });
@@ -198,9 +285,7 @@ export async function setTelegramWebhook(webhookUrl: string, secretToken?: strin
 export async function deleteTelegramWebhook() {
   const response = await fetch(telegramApi('/deleteWebhook'), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       drop_pending_updates: false
     }),
