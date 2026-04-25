@@ -185,6 +185,7 @@ async function createDonationOrder(input: {
   await admin.from('pakasir_orders').insert({
     order_id: orderId,
     amount: input.amount,
+    purpose: 'donation',
     status: 'pending',
     kind: 'support_donation',
     source: 'telegram',

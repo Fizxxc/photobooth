@@ -19,6 +19,7 @@ type PakasirOrderRow = {
   id: string;
   order_id: string;
   amount: number;
+  purpose?: string | null;
   kind?: string | null;
   source?: string | null;
   status?: string | null;
@@ -66,40 +67,22 @@ export async function POST(request: NextRequest) {
 
   const admin = createSupabaseAdminClient();
 
-  console.log('PAKASIR_WEBHOOK_RECEIVED', {
-    orderId,
-    amount,
-    status: incomingStatus,
-    project: payload?.project,
-    payment_method: payload?.payment_method,
-    completed_at: payload?.completed_at,
-    is_sandbox: payload?.is_sandbox
-  });
-
-  /**
-   * 1) Cari order utama di pakasir_orders
-   */
   let order: PakasirOrderRow | null = null;
 
   {
     const { data, error } = await admin
       .from('pakasir_orders')
-      .select('id, order_id, amount, kind, source, status, metadata')
+      .select('id, order_id, amount, purpose, kind, source, status, metadata')
       .eq('order_id', orderId)
       .maybeSingle();
 
     if (error) {
-      console.error('PAKASIR_WEBHOOK_ORDER_LOOKUP_ERROR', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     order = (data as PakasirOrderRow | null) ?? null;
   }
 
-  /**
-   * 2) Recovery path untuk support donation Telegram
-   *    Kalau belum ada di pakasir_orders, cari di donation_contributions
-   */
   let donationContribution: DonationContributionRow | null = null;
 
   if (!order && orderId.startsWith('KGS-SUPPORT-')) {
@@ -110,16 +93,10 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (error) {
-      console.error('PAKASIR_WEBHOOK_DONATION_LOOKUP_ERROR', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     donationContribution = (data as DonationContributionRow | null) ?? null;
-
-    console.log('PAKASIR_WEBHOOK_DONATION_FOUND', {
-      found: Boolean(donationContribution),
-      orderId
-    });
 
     if (donationContribution) {
       const inserted = await admin
@@ -127,6 +104,7 @@ export async function POST(request: NextRequest) {
         .insert({
           order_id: orderId,
           amount,
+          purpose: 'donation',
           status: 'pending',
           kind: 'support_donation',
           source: 'telegram',
@@ -135,11 +113,10 @@ export async function POST(request: NextRequest) {
             telegram_chat_id: donationContribution.telegram_chat_id ?? null
           }
         })
-        .select('id, order_id, amount, kind, source, status, metadata')
+        .select('id, order_id, amount, purpose, kind, source, status, metadata')
         .maybeSingle();
 
       if (inserted.error) {
-        console.error('PAKASIR_WEBHOOK_RECOVERY_INSERT_ERROR', inserted.error);
         return NextResponse.json({ error: inserted.error.message }, { status: 500 });
       }
 
@@ -147,17 +124,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  /**
-   * 3) Last-resort recovery:
-   *    Untuk support donation yang entah kenapa tidak tercatat sama sekali,
-   *    tetap buat placeholder agar webhook tidak 404 terus.
-   */
   if (!order && orderId.startsWith('KGS-SUPPORT-')) {
     const inserted = await admin
       .from('pakasir_orders')
       .insert({
         order_id: orderId,
         amount,
+        purpose: 'donation',
         status: 'pending',
         kind: 'support_donation',
         source: 'telegram',
@@ -166,47 +139,30 @@ export async function POST(request: NextRequest) {
           warning: 'Original donation row not found'
         }
       })
-      .select('id, order_id, amount, kind, source, status, metadata')
+      .select('id, order_id, amount, purpose, kind, source, status, metadata')
       .maybeSingle();
 
     if (inserted.error) {
-      console.error('PAKASIR_WEBHOOK_PLACEHOLDER_INSERT_ERROR', inserted.error);
       return NextResponse.json({ error: inserted.error.message }, { status: 500 });
     }
 
     order = (inserted.data as PakasirOrderRow | null) ?? null;
   }
 
-  /**
-   * 4) Kalau masih tidak ada, memang order tidak ditemukan
-   */
   if (!order) {
-    console.warn('PAKASIR_WEBHOOK_ORDER_NOT_FOUND', { orderId, amount });
     return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   }
 
-  /**
-   * 5) Validasi amount lokal
-   */
   if (Number(order.amount) !== amount) {
-    console.warn('PAKASIR_WEBHOOK_AMOUNT_MISMATCH', {
-      orderId,
-      expected: Number(order.amount),
-      received: amount
-    });
-
     return NextResponse.json({ error: 'Amount mismatch' }, { status: 400 });
   }
 
-  /**
-   * 6) Verifikasi ke Pakasir Transaction Detail API
-   */
   let detail: any = null;
 
   try {
     detail = await getPakasirTransactionDetail(orderId, amount);
   } catch (error) {
-    console.error('PAKASIR_WEBHOOK_DETAIL_VERIFICATION_FAILED', error);
+    console.error('Pakasir verification failed:', error);
   }
 
   const verifiedStatus = normalizeStatus(
@@ -221,9 +177,6 @@ export async function POST(request: NextRequest) {
     payload?.completed_at ??
     null;
 
-  /**
-   * 7) Simpan hasil webhook + verification
-   */
   const mergedMetadata = {
     ...(order.metadata ?? {}),
     webhook: payload,
@@ -240,17 +193,13 @@ export async function POST(request: NextRequest) {
       .eq('id', order.id);
 
     if (error) {
-      console.error('PAKASIR_WEBHOOK_UPDATE_ORDER_ERROR', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
   }
 
-  /**
-   * 8) Finalize order bila completed
-   */
   if (verifiedStatus === 'completed' || incomingStatus === 'completed') {
     try {
-      if (order.kind === 'support_donation') {
+      if (order.kind === 'support_donation' || order.purpose === 'donation') {
         await finalizeDonationOrder({
           orderId,
           amount,
@@ -261,22 +210,15 @@ export async function POST(request: NextRequest) {
         await finalizeCompletedOrder(orderId, completedAt);
       }
     } catch (error) {
-      console.error('PAKASIR_WEBHOOK_FINALIZE_ERROR', {
-        orderId,
-        kind: order.kind,
-        error
-      });
-
-      return NextResponse.json(
-        { error: 'Failed to finalize order' },
-        { status: 500 }
-      );
+      console.error('Finalize error:', error);
+      return NextResponse.json({ error: 'Failed to finalize order' }, { status: 500 });
     }
   }
 
   return NextResponse.json({
     ok: true,
     orderId,
+    purpose: order.purpose ?? null,
     kind: order.kind ?? null,
     status: verifiedStatus || incomingStatus || 'pending'
   });
