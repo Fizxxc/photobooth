@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import {
   answerCallbackQuery,
-  buildTelegramDeepLink,
   deleteTelegramMessage,
   editTelegramMessage,
   sendChatAction,
@@ -243,7 +242,7 @@ async function sendDonationPoster(input: {
   const posterBytes = new Uint8Array(posterBuffer);
   const posterBlob = new Blob([posterBytes], { type: 'image/png' });
 
-  const sent = await sendTelegramPhoto({
+  const sent = (await sendTelegramPhoto({
     chatId: input.chatId,
     photo: posterBlob,
     caption:
@@ -262,9 +261,13 @@ async function sendDonationPoster(input: {
         [{ text: '🏠 Menu', callback_data: 'menu_home' }]
       ]
     }
-  });
+  })) as {
+    result?: {
+      message_id?: number;
+    };
+  };
 
-  const messageId = Number(sent?.result?.message_id ?? 0);
+  const messageId = Number(sent.result?.message_id ?? 0);
   if (messageId) {
     await admin
       .from('donation_contributions')
@@ -289,12 +292,9 @@ export async function POST(request: NextRequest) {
     'PAKASIR_API_KEY'
   ]);
 
-  const payload = await request.json();
+  const payload: any = await request.json();
   const admin = createSupabaseAdminClient();
 
-  /**
-   * CALLBACK QUERY
-   */
   if (payload?.callback_query) {
     const callbackId = String(payload.callback_query.id ?? '');
     const callbackData = String(payload.callback_query.data ?? '');
@@ -312,7 +312,7 @@ export async function POST(request: NextRequest) {
         text:
           `Selamat datang di KoGraph Studio Bot.\n\n` +
           `• Gunakan /start KODE_UNIK untuk mengambil hasil booth\n` +
-          `• Gunakan /donasi 20000 untuk nominal bebas\n` +
+          `• Gunakan /donasi 20000 untuk donasi nominal bebas\n` +
           `• Atau pilih menu di bawah`,
         replyMarkup: mainMenuKeyboard()
       });
@@ -459,8 +459,8 @@ export async function POST(request: NextRequest) {
       const text =
         overlays && overlays.length > 0
           ? `🎨 Overlay aktif di ${booth.name}\n\n${overlays
-              .map((item, index) => `${index + 1}. ${item.label ?? 'Overlay'}`)
-              .join('\n')}`
+            .map((item, index) => `${index + 1}. ${item.label ?? 'Overlay'}`)
+            .join('\n')}`
           : 'Belum ada overlay aktif di booth ini.';
 
       await sendTelegramMessage({ chatId, text });
@@ -524,9 +524,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  /**
-   * NORMAL MESSAGE
-   */
   const messageText = String(payload?.message?.text ?? '');
   const chatId = String(payload?.message?.chat?.id ?? '');
   const from = payload?.message?.from;
@@ -628,7 +625,7 @@ export async function POST(request: NextRequest) {
     text: 'Loading'
   });
 
-  const loadingMessageId = Number(loading?.result?.message_id ?? 0);
+  const loadingMessageId = Number(loading.result?.message_id ?? 0);
   const frames = ['Loading', 'Loading.', 'Loading..', 'Loading...'];
   let frameIndex = 0;
 

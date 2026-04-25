@@ -1,4 +1,5 @@
 import 'server-only';
+
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createPakasirQrisTransaction } from '@/lib/billing/pakasir';
 import {
@@ -6,14 +7,41 @@ import {
   sendTelegramMessage,
   sendTelegramPhoto
 } from '@/lib/telegram';
-import { buildDonationSummaryText, formatIdr } from './progress';
 
-type CreateDonationInput = {
-  amount: number;
-  chatId: string;
-  telegramUserId?: string;
-  username?: string;
-};
+export function formatIdr(value: number) {
+  return `Rp ${new Intl.NumberFormat('id-ID').format(value)}`;
+}
+
+export function renderDonationProgressBar(current: number, target: number, size = 12) {
+  const safeTarget = Math.max(target, 1);
+  const ratio = Math.max(0, Math.min(current / safeTarget, 1));
+  const filled = Math.round(ratio * size);
+  const empty = size - filled;
+
+  const filledBar = '🟥'.repeat(filled);
+  const emptyBar = '⬜'.repeat(empty);
+  const percent = Math.round(ratio * 100);
+
+  return `${filledBar}${emptyBar} ${percent}%`;
+}
+
+export function buildDonationSummaryText(input: {
+  title: string;
+  current: number;
+  target: number;
+  charityPercent: number;
+}) {
+  const { title, current, target, charityPercent } = input;
+
+  return [
+    `💖 *${title}*`,
+    '',
+    renderDonationProgressBar(current, target),
+    `${formatIdr(current)} / ${formatIdr(target)}`,
+    '',
+    `Sebagian dana (${charityPercent}%) akan disalurkan kepada yang membutuhkan.`
+  ].join('\n');
+}
 
 export async function getActiveDonationSettings() {
   const admin = createSupabaseAdminClient();
@@ -29,7 +57,12 @@ export async function getActiveDonationSettings() {
   return data;
 }
 
-export async function createTelegramDonationOrder(input: CreateDonationInput) {
+export async function createTelegramDonationOrder(input: {
+  amount: number;
+  chatId: string;
+  telegramUserId?: string;
+  username?: string;
+}) {
   const admin = createSupabaseAdminClient();
   const settings = await getActiveDonationSettings();
 
@@ -39,7 +72,7 @@ export async function createTelegramDonationOrder(input: CreateDonationInput) {
 
   const minimumAmount = Number(settings.minimum_amount || 1000);
   if (input.amount < minimumAmount) {
-    throw new Error(`Minimum donasi adalah ${minimumAmount}.`);
+    throw new Error(`Minimum donasi adalah ${formatIdr(minimumAmount)}.`);
   }
 
   const orderId = `KGS-SUPPORT-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
@@ -57,15 +90,16 @@ export async function createTelegramDonationOrder(input: CreateDonationInput) {
     status: 'pending',
     metadata: {
       chat_id: input.chatId,
-      username: input.username ?? null
+      username: input.username ?? null,
+      telegram_user_id: input.telegramUserId ?? null
     }
   });
 
   await admin.from('donation_contributions').insert({
     order_id: orderId,
     amount: input.amount,
-    status: 'pending',
     source: 'telegram',
+    status: 'pending',
     telegram_chat_id: input.chatId,
     telegram_user_id: input.telegramUserId ?? null,
     telegram_username: input.username ?? null,
@@ -106,6 +140,7 @@ export async function sendDonationQrisMessage(input: {
     chatId: input.chatId,
     photoUrl: input.qrisImageUrl,
     caption,
+    parseMode: 'Markdown',
     replyMarkup: {
       inline_keyboard: [
         [
@@ -161,8 +196,10 @@ export async function finalizeDonationOrder(input: {
     .eq('order_id', input.orderId);
 
   const settings = await getActiveDonationSettings();
+
   if (settings) {
-    const newCollected = Number(settings.collected_amount || 0) + Number(input.amount || 0);
+    const newCollected =
+      Number(settings.collected_amount || 0) + Number(input.amount || 0);
 
     await admin
       .from('donation_settings')
@@ -176,7 +213,7 @@ export async function finalizeDonationOrder(input: {
       `✅ *Terima kasih sudah donasi*`,
       '',
       `Donasi sebesar *${formatIdr(input.amount)}* sudah kami terima.`,
-      `Sebagian dana akan disumbangkan kepada yang membutuhkan.`,
+      `Sebagian dana akan disalurkan kepada yang membutuhkan.`,
       '',
       buildDonationSummaryText({
         title: settings.title,
@@ -192,6 +229,7 @@ export async function finalizeDonationOrder(input: {
           chatId: contribution.telegram_chat_id,
           messageId: Number(contribution.payment_message_id),
           caption: thankYouText,
+          parseMode: 'Markdown',
           replyMarkup: {
             inline_keyboard: [
               [
@@ -203,10 +241,18 @@ export async function finalizeDonationOrder(input: {
           }
         });
       } catch {
-        await sendTelegramMessage(contribution.telegram_chat_id, thankYouText);
+        await sendTelegramMessage({
+          chatId: contribution.telegram_chat_id,
+          text: thankYouText,
+          parseMode: 'Markdown'
+        });
       }
     } else if (contribution.telegram_chat_id) {
-      await sendTelegramMessage(contribution.telegram_chat_id, thankYouText);
+      await sendTelegramMessage({
+        chatId: contribution.telegram_chat_id,
+        text: thankYouText,
+        parseMode: 'Markdown'
+      });
     }
   }
 }

@@ -100,7 +100,10 @@ export async function sendTelegramBroadcast(formData: FormData): Promise<void> {
         caption: message
       });
     } else {
-      await sendTelegramMessage(chatId, message);
+      await sendTelegramMessage({
+        chatId,
+        text: message
+      });
     }
   }
 
