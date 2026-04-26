@@ -1,170 +1,67 @@
-# ==============================
-# KoGraph Studio / Photobooth
-# Next.js + Vercel + Python API
-# ==============================
-
-
-# ------------------------------
-# Dependencies
-# ------------------------------
-node_modules/
-.pnp/
+# dependencies
+/node_modules
+/.pnp
 .pnp.js
-.yarn/install-state.gz
 
-# Python virtual env
-.venv/
-venv/
-env/
-ENV/
-__pycache__/
-*.py[cod]
-*$py.class
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
+# next.js
+/.next
+/out
+/build
 
+# production
+/dist
 
-# ------------------------------
-# Next.js / Build Output
-# ------------------------------
-.next/
-out/
-build/
-dist/
-.turbo/
-
-
-
-# ------------------------------
-# Vercel
-# ------------------------------
-
-
-
-# ------------------------------
-# Environment files
-# ------------------------------
-.env
-.env.*
-!.env.example
-!.env.local.example
-
-
-# ------------------------------
-# Logs
-# ------------------------------
-logs/
-*.log
+# logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-pip-log.txt
-pip-delete-this-directory.txt
+*.log
 
+# env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
 
-# ------------------------------
-# OS / Editor
-# ------------------------------
-.DS_Store
-Thumbs.db
-desktop.ini
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.example.json
-.idea/
+# vercel
+.vercel
 
-
-# ------------------------------
-# TypeScript
-# ------------------------------
+# typescript
 *.tsbuildinfo
 next-env.d.ts
 
-
-# ------------------------------
-# Testing / Coverage
-# ------------------------------
-coverage/
-playwright-report/
-test-results/
-.nyc_output/
-
-
-# ------------------------------
-# Package managers
-# ------------------------------
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-.pnpm-store/
-
-
-# ------------------------------
-# Python model / AI assets
-# Jangan commit model besar ke GitHub
-# ------------------------------
-models/
-*.pth
-*.pt
-*.onnx
-*.ckpt
-*.safetensors
-*.bin
-
-
-# ------------------------------
-# Generated photobooth media
-# ------------------------------
-captures/
-sessions/
-exports/
-prints/
-uploads/
-tmp/
-temp/
-*.jpg
-*.jpeg
-*.png
-*.webp
-*.gif
-*.mp4
-*.mov
-*.avi
-*.mkv
-
-# Kalau kamu punya overlay default yang memang mau dicommit,
-# simpan di public/overlays dan uncomment rule pengecualian ini:
-# !public/overlays/
-# !public/overlays/**/*.png
-
-
-# ------------------------------
-# Supabase local
-# ------------------------------
-.supabase/
-supabase/.branches/
-supabase/.temp/
-
-
-# ------------------------------
-# Database / Local files
-# ------------------------------
-*.sqlite
-*.sqlite3
-*.db
-
-
-# ------------------------------
-# Misc
-# ------------------------------
-.cache/
-*.bak
-*.tmp
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea
 *.swp
 *.swo
+.DS_Store
+Thumbs.db
+
+# testing
+/coverage
+/playwright-report
+/test-results
+
+# temp files
+*.tmp
+*.temp
+.cache
+
+# uploads / generated assets (optional, kalau ada local generated)
+public/generated
+public/uploads
+tmp
+storage-temp
+
+# package manager locks (pilih sesuai yang kamu pakai, biasanya jangan ignore)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# supabase local
+.supabase
