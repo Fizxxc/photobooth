@@ -1,7 +1,8 @@
 {
-  "functions": {
-    "api/booth/main.py": {
-      "maxDuration": 300
+  "rewrites": [
+    {
+      "source": "/api/booth/:path*",
+      "destination": "/api/booth.py"
     }
-  }
+  ]
 }
