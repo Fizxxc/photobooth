@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/booth/:path*",
-      "destination": "/api/booth.py"
+      "destination": "/api/index.py"
     }
   ]
 }

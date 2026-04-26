@@ -1,6 +1,0 @@
-from .tts import tts_worker
-
-
-def speak(text: str) -> None:
-    tts_worker.start()
-    tts_worker.say(text)
