@@ -71,20 +71,50 @@ export type BoothAgentEvent =
       payload: Record<string, unknown>;
     };
 
-async function requestAgent<T>(
-  path: string,
-  body?: unknown
-): Promise<T> {
-  const response = await fetch(`${clientEnv.NEXT_PUBLIC_BOOTH_AGENT_HTTP_URL}${path}`, {
+type ApiResponseWithImage = {
+  ok: boolean;
+  imageDataUrl: string;
+  message?: string;
+};
+
+type VoiceCommandResponse = {
+  ok: boolean;
+  command: string;
+  message: string;
+  filter?: PhotoFilter;
+  background?: string;
+  phone?: string;
+};
+
+function getApiBaseUrl() {
+  return clientEnv.NEXT_PUBLIC_BOOTH_API_BASE_URL.replace(/\/$/, '');
+}
+
+async function requestBoothApi<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method: body ? 'POST' : 'GET',
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined
+    body: body ? JSON.stringify(body) : undefined,
+    cache: 'no-store'
   });
 
-  const payload = await response.json();
+  let payload: unknown = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
 
   if (!response.ok) {
-    throw new Error(payload?.detail ?? 'Booth Agent error.');
+    const errorPayload = payload as { detail?: string; error?: string; message?: string } | null;
+
+    throw new Error(
+      errorPayload?.detail ??
+        errorPayload?.error ??
+        errorPayload?.message ??
+        'Booth Python API error.'
+    );
   }
 
   return payload as T;
@@ -110,90 +140,97 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
 export async function imageSourceToDataUrl(source: string): Promise<string> {
   if (source.startsWith('data:')) return source;
 
-  const response = await fetch(source);
+  const response = await fetch(source, {
+    cache: 'no-store'
+  });
+
+  if (!response.ok) {
+    throw new Error('Gagal mengambil image source.');
+  }
+
   const blob = await response.blob();
 
   return blobToDataUrl(blob);
 }
 
 export async function getBoothAgentStatus() {
-  return requestAgent<{
+  return requestBoothApi<{
     ok: boolean;
     status: Record<string, unknown>;
   }>('/api/booth/status');
 }
 
 export async function upscalePhoto(imageDataUrl: string) {
-  const response = await requestAgent<{
-    ok: boolean;
-    imageDataUrl: string;
-    message: string;
-  }>('/api/booth/upscale', { imageDataUrl });
+  const response = await requestBoothApi<ApiResponseWithImage>('/api/booth/ai/upscale', {
+    imageDataUrl
+  });
 
   return response.imageDataUrl;
 }
 
 export async function applyPhotoFilter(imageDataUrl: string, filter: PhotoFilter) {
-  const response = await requestAgent<{
-    ok: boolean;
-    imageDataUrl: string;
-    filter: PhotoFilter;
-    message: string;
-  }>('/api/booth/filter', { imageDataUrl, filter });
+  const response = await requestBoothApi<ApiResponseWithImage & { filter?: PhotoFilter }>(
+    '/api/booth/ai/filter',
+    {
+      imageDataUrl,
+      filter
+    }
+  );
 
   return response.imageDataUrl;
 }
 
 export async function replacePhotoBackground(imageDataUrl: string, background: string) {
-  const response = await requestAgent<{
-    ok: boolean;
-    imageDataUrl: string;
-    background: string;
-    message: string;
-  }>('/api/booth/background', { imageDataUrl, background });
+  const response = await requestBoothApi<ApiResponseWithImage & { background?: string }>(
+    '/api/booth/ai/background',
+    {
+      imageDataUrl,
+      background
+    }
+  );
 
   return response.imageDataUrl;
 }
 
 export async function animePhoto(imageDataUrl: string) {
-  const response = await requestAgent<{
-    ok: boolean;
-    imageDataUrl: string;
-    message: string;
-  }>('/api/booth/anime', { imageDataUrl });
+  const response = await requestBoothApi<ApiResponseWithImage>('/api/booth/ai/anime', {
+    imageDataUrl
+  });
 
   return response.imageDataUrl;
 }
 
 export async function decorateFace(imageDataUrl: string) {
-  const response = await requestAgent<{
-    ok: boolean;
-    imageDataUrl: string;
-    message: string;
-  }>('/api/booth/face-accessory', { imageDataUrl });
+  const response = await requestBoothApi<ApiResponseWithImage>('/api/booth/ai/face-accessory', {
+    imageDataUrl
+  });
 
   return response.imageDataUrl;
 }
 
 export async function sendVoiceCommand(text: string, imageDataUrl?: string | null) {
-  return requestAgent<{
-    ok: boolean;
-    command: string;
-    message: string;
-    filter?: PhotoFilter;
-    background?: string;
-    phone?: string;
-  }>('/api/booth/command', { text, imageDataUrl });
+  return requestBoothApi<VoiceCommandResponse>('/api/booth/voice/command', {
+    text,
+    imageDataUrl: imageDataUrl ?? null
+  });
 }
 
 export async function sendAfterCapture() {
-  return requestAgent<{
+  return requestBoothApi<{
     ok: boolean;
     message: string;
-    offers: string[];
-  }>('/api/booth/after-capture', {});
+    offers?: string[];
+  }>('/api/booth/voice/after-capture', {});
 }
 
+/**
+ * Vercel-only mode:
+ * WebSocket lokal tidak dipakai.
+ * Function ini tetap disediakan supaya import lama dari useBoothAgent.ts tidak bikin build error.
+ */
 export function createBoothAgentWebSocket() {
-  return new WebSocket(clientEnv.NEXT_PUBLIC_BOOTH_AGENT_WS_URL);
+  const baseUrl = getApiBaseUrl();
+  const wsUrl = baseUrl.replace(/^http/, 'ws');
+
+  return new WebSocket(`${wsUrl}/api/booth/ws`);
 }

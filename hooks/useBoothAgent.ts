@@ -22,9 +22,31 @@ type RunOptions = {
   onImageResult: (imageDataUrl: string) => void;
 };
 
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizePercent(value: unknown): number {
+  const numberValue = asNumber(value, 0);
+
+  return Math.max(0, Math.min(100, Math.round(numberValue)));
+}
+
 export function useBoothAgent() {
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
 
   const [status, setStatus] = useState<AgentStatus>('connecting');
   const [message, setMessage] = useState<string | null>(null);
@@ -48,47 +70,57 @@ export function useBoothAgent() {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data) as BoothAgentEvent;
+          const payload = asRecord(data.payload);
+
           setLastEvent(data);
 
           if (data.type === 'ready') {
             setStatus('connected');
-            setMessage(data.payload.message);
+            setMessage(asString(payload.message, 'KoGraph Booth Agent connected.'));
+            return;
           }
 
           if (data.type === 'voice.heard') {
-            setMessage(`Voice: ${data.payload.text}`);
+            setMessage(`Voice: ${asString(payload.text, '-')}`);
+            return;
           }
 
           if (data.type === 'voice.reply') {
-            setMessage(data.payload.message);
+            setMessage(asString(payload.message, ''));
+            return;
           }
 
           if (data.type === 'ai.started') {
-            setAiJob(data.payload.job);
-            setAiProgress(data.payload.percent);
-            setAiMessage(data.payload.message);
+            setAiJob(asString(payload.job, 'ai'));
+            setAiProgress(normalizePercent(payload.percent));
+            setAiMessage(asString(payload.message, 'AI processing dimulai.'));
+            return;
           }
 
           if (data.type === 'ai.progress') {
-            setAiJob(data.payload.job);
-            setAiProgress(data.payload.percent);
-            setAiMessage(data.payload.message);
+            setAiJob(asString(payload.job, 'ai'));
+            setAiProgress(normalizePercent(payload.percent));
+            setAiMessage(asString(payload.message, 'AI processing...'));
+            return;
           }
 
           if (data.type === 'ai.done') {
-            setAiJob(data.payload.job);
+            setAiJob(asString(payload.job, 'ai'));
             setAiProgress(100);
-            setAiMessage(data.payload.message);
+            setAiMessage(asString(payload.message, 'AI processing selesai.'));
+            return;
           }
 
           if (data.type === 'ai.error') {
+            const errorMessage = asString(payload.message, 'AI processing error.');
+
             setAiJob(null);
             setAiProgress(0);
-            setAiMessage(data.payload.message);
-            setMessage(data.payload.message);
+            setAiMessage(errorMessage);
+            setMessage(errorMessage);
           }
         } catch {
-          // ignore invalid WS payload
+          // Ignore invalid WebSocket payload.
         }
       };
 
@@ -134,6 +166,7 @@ export function useBoothAgent() {
     async ({ imageSource, onImageResult }: RunOptions) => {
       const dataUrl = await imageSourceToDataUrl(imageSource);
       const result = await upscalePhoto(dataUrl);
+
       onImageResult(result);
       finishLater();
     },
@@ -144,6 +177,7 @@ export function useBoothAgent() {
     async ({ imageSource, onImageResult }: RunOptions, filter: PhotoFilter) => {
       const dataUrl = await imageSourceToDataUrl(imageSource);
       const result = await applyPhotoFilter(dataUrl, filter);
+
       onImageResult(result);
       finishLater();
     },
@@ -154,6 +188,7 @@ export function useBoothAgent() {
     async ({ imageSource, onImageResult }: RunOptions, background: string) => {
       const dataUrl = await imageSourceToDataUrl(imageSource);
       const result = await replacePhotoBackground(dataUrl, background);
+
       onImageResult(result);
       finishLater();
     },
@@ -164,6 +199,7 @@ export function useBoothAgent() {
     async ({ imageSource, onImageResult }: RunOptions) => {
       const dataUrl = await imageSourceToDataUrl(imageSource);
       const result = await animePhoto(dataUrl);
+
       onImageResult(result);
       finishLater();
     },
@@ -174,6 +210,7 @@ export function useBoothAgent() {
     async ({ imageSource, onImageResult }: RunOptions) => {
       const dataUrl = await imageSourceToDataUrl(imageSource);
       const result = await decorateFace(dataUrl);
+
       onImageResult(result);
       finishLater();
     },
@@ -204,6 +241,16 @@ export function useBoothAgent() {
 
       setMessage(parsed.message);
 
+      if (parsed.command === 'print_now') {
+        onPrint?.();
+        return;
+      }
+
+      if (parsed.command === 'delivery_whatsapp' && parsed.phone) {
+        onWhatsapp?.(parsed.phone);
+        return;
+      }
+
       if (!dataUrl || !onImageResult) {
         return;
       }
@@ -212,38 +259,34 @@ export function useBoothAgent() {
         const result = await upscalePhoto(dataUrl);
         onImageResult(result);
         finishLater();
+        return;
       }
 
       if (parsed.command === 'filter') {
         const result = await applyPhotoFilter(dataUrl, parsed.filter ?? 'clean');
         onImageResult(result);
         finishLater();
+        return;
       }
 
       if (parsed.command === 'background') {
         const result = await replacePhotoBackground(dataUrl, parsed.background ?? 'pantai');
         onImageResult(result);
         finishLater();
+        return;
       }
 
       if (parsed.command === 'anime') {
         const result = await animePhoto(dataUrl);
         onImageResult(result);
         finishLater();
+        return;
       }
 
       if (parsed.command === 'face_accessory') {
         const result = await decorateFace(dataUrl);
         onImageResult(result);
         finishLater();
-      }
-
-      if (parsed.command === 'print_now') {
-        onPrint?.();
-      }
-
-      if (parsed.command === 'delivery_whatsapp' && parsed.phone) {
-        onWhatsapp?.(parsed.phone);
       }
     },
     [finishLater]
