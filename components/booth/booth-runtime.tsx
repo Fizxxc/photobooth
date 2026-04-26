@@ -702,17 +702,15 @@ export function BoothRuntime({
                           type="button"
                           onClick={() => setSelectedOverlayId(overlay.id)}
                           disabled={shutterBusy}
-                          className={`w-full rounded-[24px] border p-3 text-left transition ${
-                            active
+                          className={`w-full rounded-[24px] border p-3 text-left transition ${active
                               ? 'border-white/45 bg-white text-black'
                               : 'border-white/10 bg-black/25 text-white hover:bg-white/[0.08]'
-                          } disabled:cursor-not-allowed disabled:opacity-60`}
+                            } disabled:cursor-not-allowed disabled:opacity-60`}
                         >
                           <div className="flex items-center gap-3">
                             <div
-                              className={`h-16 w-12 overflow-hidden rounded-2xl border ${
-                                active ? 'border-black/10 bg-black/5' : 'border-white/10 bg-white'
-                              }`}
+                              className={`h-16 w-12 overflow-hidden rounded-2xl border ${active ? 'border-black/10 bg-black/5' : 'border-white/10 bg-white'
+                                }`}
                             >
                               {overlay.signed_url ? (
                                 <img
@@ -943,11 +941,10 @@ export function BoothRuntime({
                           type="button"
                           onClick={() => setCountdownPreset(value as 3 | 5)}
                           disabled={shutterBusy}
-                          className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition ${
-                            countdownPreset === value
+                          className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition ${countdownPreset === value
                               ? 'bg-white text-black'
                               : 'text-white/55 hover:bg-white/10'
-                          } disabled:cursor-not-allowed`}
+                            } disabled:cursor-not-allowed`}
                         >
                           {value}s
                         </button>
@@ -1003,7 +1000,7 @@ export function BoothRuntime({
 
                   <div className="mt-5 grid grid-cols-2 gap-3">
                     <a
-                      href={finalPreview}
+                      href={finalPreview ?? undefined}
                       download="kograph-strip.png"
                       className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-black transition hover:opacity-90"
                     >

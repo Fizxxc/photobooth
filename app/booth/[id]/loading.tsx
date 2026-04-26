@@ -14,30 +14,18 @@ export default function BoothLoading() {
 
         <h2 className="mt-3 text-2xl font-semibold tracking-tight">Preparing booth</h2>
 
+        <div className="mx-auto mt-6 h-1.5 w-56 overflow-hidden rounded-full bg-white/10">
+          <div className="booth-loading-bar h-full w-1/2 rounded-full bg-white" />
+        </div>
+
         <p className="mt-2 text-sm text-white/50">
           Menyiapkan kamera, overlay, dan runtime sesi.
         </p>
 
         <div className="mx-auto mt-6 h-1.5 w-56 overflow-hidden rounded-full bg-white/10">
-          <div className="booth-loading-bar h-full w-1/2 rounded-full bg-white" />
+          <div className="h-full w-1/2 animate-pulse rounded-full bg-white" />
         </div>
       </div>
-
-      <style jsx global>{`
-        .booth-loading-bar {
-          animation: boothLoadingBar 1.1s ease-in-out infinite;
-        }
-
-        @keyframes boothLoadingBar {
-          0% {
-            transform: translateX(-120%);
-          }
-
-          100% {
-            transform: translateX(240%);
-          }
-        }
-      `}</style>
     </main>
   );
 }
