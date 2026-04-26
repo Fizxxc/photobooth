@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/booth/main.py": {
+      "maxDuration": 300
+    }
+  }
+}

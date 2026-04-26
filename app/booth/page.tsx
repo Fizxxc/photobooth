@@ -17,7 +17,7 @@ export default async function BoothIndexPage() {
     .limit(1)
     .maybeSingle();
 
-  if (error || !booth) {
+  if (error || !booth?.id) {
     redirect('/dashboard?error=no-booth');
   }
 
