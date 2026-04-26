@@ -28,7 +28,6 @@ export default async function BoothPage({ params, searchParams }: BoothPageProps
 
   let boothId = params.id;
   let boothName = 'KoGraph Studio Booth';
-
   let overlays: Array<{
     id: string;
     label: string;
@@ -62,7 +61,7 @@ export default async function BoothPage({ params, searchParams }: BoothPageProps
   }
 
   return (
-    <main className="fixed inset-0 overflow-hidden bg-[#070707] text-white">
+    <main className="min-h-screen overflow-hidden bg-[#050505] text-white">
       <BoothRuntime
         boothId={boothId}
         boothName={boothName}
@@ -72,7 +71,7 @@ export default async function BoothPage({ params, searchParams }: BoothPageProps
       />
 
       {isMonitorMode ? (
-        <div className="pointer-events-none fixed bottom-5 left-1/2 z-[200] -translate-x-1/2 rounded-full border border-white/10 bg-black/50 px-4 py-2 text-[10px] uppercase tracking-[0.32em] text-white/60 backdrop-blur">
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-[200] -translate-x-1/2 rounded-full border border-white/10 bg-black/70 px-4 py-2 text-[10px] uppercase tracking-[0.28em] text-white/70 backdrop-blur-xl">
           Monitor Mode
         </div>
       ) : null}
